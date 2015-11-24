@@ -29,6 +29,7 @@ def test_gaussian():
     check symmetric gaussian against analytic solution
 
     """
+    # sample random thermalization time and Gaussian width
     t0 = np.random.uniform(0.01, 1.5)
     sigma = np.random.uniform(0.4, 1.0)
     sigma_sq = sigma*sigma
@@ -57,11 +58,21 @@ def test_gaussian():
     pos_x = np.s_[int(nsteps/2), int(nsteps/2)+1:int(0.95*nsteps)]
     x = X[pos_x]
 
+    # T^uv can be computed analytically on the x-axis starting from a symmetric
+    # Gaussian initial state.  After appropriate change of the variables the
+    # integrals become Bessel functions.
+
+    # This prefactor multiplies the entire matrix.
     prefactor = np.exp(-(x*x + t0*t0)/(2*sigma_sq)) / (2*np.pi*sigma_sq*t0)
+
+    # Dimensionless variable that appears often.
     w = x*t0/sigma_sq
+
+    # Bessel functions I_0 and I_1.
     i0 = special.i0(w)
     i1 = special.i1(w)
 
+    # Compare to exact results for T^uv.
     for (u, v, Tuv_exact) in [
             (0, 0, i0),
             (0, 1, i1),
@@ -73,12 +84,17 @@ def test_gaussian():
         assert_allclose(fs.Tuv(u, v)[pos_x], prefactor*Tuv_exact,
                         'T{}{}'.format(u, v))
 
+    # The Landau matching eigenvalue problem can also be solved analytically.
+    # This discriminant "d" from the characteristic equation appears frequently
+    # in the remaining expressions.
     d = np.sqrt(i1*i1 - 4*i0*i1*w + 4*(i0-i1)*(i0+i1)*w*w)
-    energy_density = prefactor/(2*w) * (i1 + d)
 
+    # Verify energy density (eigenvalue).
+    energy_density = prefactor/(2*w) * (i1 + d)
     assert_allclose(fs.energy_density()[pos_x], energy_density,
                     'energy density')
 
+    # Verify flow velocity (eigenvector).
     u0, u1, u2 = fs.flow_velocity().T
     assert np.allclose(u0*u0 - u1*u1 - u2*u2, 1), \
         'flow velocities are not normalized'
@@ -92,6 +108,8 @@ def test_gaussian():
         assert_allclose(fs.flow_velocity(i)[pos_x], v/v_norm,
                         'flow velocity u{}'.format(i))
 
+    # The shear tensor pi^uv can also be computed analytically, although the
+    # expressions are somewhat tedious...
     for (u, v, piuv_exact) in [
             (0, 0, (i1*i1*(1 + 4*w*w) + i1*d + 2*i0*w*(d - 2*i0*w))/(6*w*d)),
             (0, 1, i1/3 * (1 - 2*i1/d)),
@@ -104,9 +122,11 @@ def test_gaussian():
         assert_allclose(fs.shear_tensor(u, v)[pos_x], prefactor*piuv_exact,
                         'shear tensor pi{}{}'.format(u, v))
 
+    # Bulk pressure is zero for ideal eos...
     assert_allclose(fs.bulk_pressure(), 0, 'ideal bulk pressure',
                     rtol=1e-5, atol=1e-10)
 
+    # ...and nonzero for any other eos.
     assert_allclose(
         fs.bulk_pressure(eos=lambda e: e/6)[pos_x], energy_density/6,
         'nonideal bulk pressure', rtol=1e-4, atol=1e-7
@@ -122,11 +142,17 @@ def test_random():
         with assert_raises(ValueError):
             freestream.FreeStreamer(np.empty(bad_shape), 10, 1)
 
+    # Test the algorithm on a more interesting initial state that cannot be
+    # solved analytically.
+
+    # Construct a random initial state by sampling normally-distributed
+    # positions for Gaussian blobs.
     t0 = np.random.uniform(0.01, 1.5)
     sigma = np.random.uniform(0.4, 0.8)
 
     xy0 = np.random.standard_normal(50).reshape(-1, 2)
 
+    # Define function that evaluates the initial density at (x, y) points.
     def f(x, y):
         z = np.zeros_like(x)
         for (x0, y0) in xy0:
@@ -134,6 +160,7 @@ def test_random():
         z /= 2*np.pi*sigma**2
         return z
 
+    # Discretize the function onto a grid.
     xymax = np.max(xy0) + 5*sigma + 2*t0
     nsteps = int(2*xymax/0.1) + 2
     grid_max = xymax/(1 - 1/nsteps)
@@ -152,6 +179,7 @@ def test_random():
         'particle number is not conserved: {} != {}'.format(initial_sum,
                                                             final_sum)
 
+    # Pick some random grid points to check near the middle-ish of the grid.
     check_indices = np.random.randint(0.25*nsteps, 0.75*nsteps, (10, 2))
     check_Tuv = fs.Tuv()[check_indices.T[1], check_indices.T[0]]
     check_xy = (check_indices + 0.5)*2*grid_max/nsteps - grid_max
@@ -160,6 +188,8 @@ def test_random():
     for (ix, iy), (x, y) in zip(check_indices, check_xy):
         print('{: 5d}{: 4d}{: 7.2f}{: 6.2f}'.format(ix, iy, x, y))
 
+    # Check the components of T^uv against adaptive quadrature integration of
+    # the actual continuous function.
     for u, v, w in [
             (0, 0, lambda phi: 1),
             (0, 1, np.cos),

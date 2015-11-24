@@ -10,6 +10,24 @@ __all__ = ['ideal_eos', 'FreeStreamer']
 __version__ = '1.0-dev'
 
 
+"""
+References:
+
+[1] J. Liu, C. Shen, U. Heinz
+    Pre-equilibrium evolution effects on heavy-ion collision observables
+    PRC 91 064906 (2015)
+    arXiv:1504.02160 [nucl-th]
+    http://inspirehep.net/record/1358669
+
+[2] W. Broniowski, W. Florkowski, M. Chojnacki, A. Kisiel
+    Free-streaming approximation in early dynamics
+        of relativistic heavy-ion collisions
+    PRCC 80 034902 (2009)
+    arXiv:0812.3393 [nucl-th]
+    http://inspirehep.net/record/805616
+"""
+
+
 def ideal_eos(e):
     """
     Ideal equation of state: P = e/3
@@ -31,19 +49,44 @@ class FreeStreamer(object):
             raise ValueError('initial must be a square array')
 
         nsteps = initial.shape[0]
+
+        # grid_max is the outer edge of the outermost grid cell;
+        # xymax is the midpoint of the same cell.
+        # They are different by half a cell width, i.e. grid_max/nsteps.
         xymax = grid_max*(1 - 1/nsteps)
+
+        # Initialize the 2D interpolating spline.
+        # The scipy class has the x and y dimensions reversed,
+        # so give it the transpose of the initial state.
         xy = np.linspace(-xymax, xymax, nsteps)
         spline = interp.RectBivariateSpline(xy, xy, initial.T)
 
-        # XXX
+        # Prepare for evaluating the T^μν integrals, Eq. (7) in [1] and
+        # Eq. (10) in [2].  For each grid cell, there are six integrals
+        # (for the six independent components of T^μν), each of which is a
+        # line integral around a circle of radius tau_0.
+
+        # The only way to do this with reasonable speed in python is to
+        # pre-determine the integration points and vectorize the calculation.
+        # Among the usual fixed-point (non-adaptive) integration rules, the
+        # trapezoid rule was found to converge faster than both the Simpson
+        # rule and Gauss-Legendre quadrature.
+
+        # Set the number of points so the arc length of each step is roughly
+        # the size of a grid cell.  Clip the number of points to a reasonable
+        # range.
         npoints = min(max(int(np.ceil(np.pi*time*nsteps/grid_max)), 30), 100)
         phi = np.linspace(0, 2*np.pi, npoints, endpoint=False)
         cos_phi = np.cos(phi)
         sin_phi = np.sin(phi)
 
+        # Cache the x and y evaluation points for the integrals.
+        # X and Y are (nsteps, npoints) arrays.
         X = np.subtract.outer(xy, time*cos_phi)
         Y = np.subtract.outer(xy, time*sin_phi)
 
+        # Create lists of the upper-triangle indices and corresponding weight
+        # functions for the integrals.
         u, v, K = zip(*[
             (0, 0, np.ones_like(phi)),
             (0, 1, cos_phi),
@@ -52,21 +95,45 @@ class FreeStreamer(object):
             (1, 2, cos_phi*sin_phi),
             (2, 2, sin_phi*sin_phi),
         ])
+
+        # K (6, npoints) contains the weights for each integral.
         K = np.array(K)
         K /= phi.size
 
+        # Initialize T^μν array.
         Tuv = np.empty((nsteps, nsteps, 3, 3))
 
+        # Compute the integrals one row at a time; this avoids significant
+        # python function call overhead compared to computing one cell at a
+        # time.  In principle everything could be done in a single function
+        # call, but this would require a very large temporary array and hence
+        # may even be slower.  Vectorizing each row sufficiently minimizes the
+        # function call overhead with a manageable memory footprint.
         for row, y in zip(Tuv, Y):
+            # Evaluate the spline on all the integration points for this row.
+            # Z (nsteps, npoints) contains the function evaluations along the
+            # circles centered at each grid point along the row.  This line
+            # accounts for ~90% of the total computation time!
             Z = spline(X, y, grid=False)
+            # Cubic interpolation can sometimes go slightly negative.
             Z.clip(min=0, out=Z)
+            # Compute all six integrals in a single function call to the inner
+            # product and write the result into the T^μν array.  np.inner
+            # calculates the sum over the last axes of Z (nsteps, npoints) and
+            # K (6, npoints), returning an (nsteps, 6) array.  In other words,
+            # it sums over the integration points for each grid cell in the
+            # row.  np.inner is a highly-optimized linear algebra routine so
+            # this is very efficient.
             row[:, u, v] = np.inner(Z, K)
 
+        # Copy the upper triangle to the lower triangle.
         u, v = zip(*[(0, 1), (0, 2), (1, 2)])
         Tuv[..., v, u] = Tuv[..., u, v]
 
+        # Normalize the tensor for boost-invariant longitudinal expansion.
         Tuv /= time
 
+        # Initialize class members.
         self._Tuv = Tuv
         self._energy_density = None
         self._flow_velocity = None
@@ -86,40 +153,69 @@ class FreeStreamer(object):
 
     def _compute_energy_density_flow_velocity(self):
         """
-        Perform Landau matching to obtain the energy density and flow velocity
-        profiles.
+        Compute energy density and flow velocity by solving the eigenvalue
+        equation from the Landau matching condition.
 
         """
-        # ignore empty grid cells
+        # Ignore empty grid cells.
         T00 = self._Tuv[..., 0, 0]
         nonzero = T00 > 1e-16 * T00.max()
 
-        # The Landau matching condition is
-        #   T^μν u_ν = e u^μ
-        # which is not quite an eigenvalue equation because the flow velocity
-        # index is lowered on the LHS and raised on the RHS.
-        # Instead, we solve
-        #   T^μ_ν u^ν = e u^μ.
-        # Note that lowering the second index on T makes the matrix NOT
-        # symmetric, so we must use the general eigensystem solver.
+        # The Landau matching condition expressed as an eigenvalue equation is
+        #
+        #   T^μ_ν u^ν = e u^μ
+        #
+        # where the timelike eigenvector u^μ is the four-velocity required to
+        # boost to the local rest frame of the fluid, and the eigenvalue e is
+        # the energy density in the local rest frame.
+
+        # Construct the mixed tensor Tu_v (n, 3, 3), where n is the number of
+        # nonzero grid cells.
         Tu_v = np.copy(self._Tuv[nonzero])
         Tu_v[..., :, 1:] *= -1
+
+        # The mixed tensor is NOT symmetric, so must use the general
+        # eigensystem solver.  Recent versions of numpy can solve all the
+        # eigensystems in a single function call (there's still an outer loop
+        # over the array, but it is executed in C).
         eigvals, eigvecs = np.linalg.eig(Tu_v)
 
+        # eigvals (n, 3) contains the 3 eigenvalues for each nonzero grid cell.
+        # eigvecs (n, 3, 3) contains the eigenvectors, where in each (3, 3)
+        # block the columns are the vectors and the rows are the (t, x, y)
+        # components.
+
+        # The physical flow velocity and energy density correspond to the
+        # (unique) timelike eigenvector.
         t, x, y = eigvecs.transpose(1, 0, 2)
         timelike = t*t > x*x + y*y
 
+        # "timelike" is an (n, 3) array of booleans denoting the timelike
+        # eigenvector (if any) for each grid cell.  This line updates the
+        # "nonzero" mask to ignore cells that lack a timelike eigenvector.
+        # Effectively it is a logical and, i.e. each grid cell must be nonzero
+        # AND have a timelike eigvec.
         nonzero[nonzero] = timelike.any(axis=1)
 
+        # Save the physical eigenvalues in the internal energy density array.
         self._energy_density = np.zeros(self._Tuv.shape[:2])
         self._energy_density[nonzero] = eigvals[timelike]
 
+        # Select the timelike eigenvectors and correct the overall signs, if
+        # necessary (the overall sign of numerical eigenvectors is arbitrary,
+        # but u^0 should always be positive).
         u = eigvecs.transpose(0, 2, 1)[timelike]
         u0 = u[..., 0]
         u[u0 < 0] *= -1
 
+        # Normalize the flow velocity in Minkowski space.  The numerical solver
+        # returns vectors A*u normalized in Euclidean space as
+        # A^2*(u0^2 + u1^2 + u2^2) = 1, which need to be renormalized as
+        # u0^2 - u1^2 - u2^2 = 1.  The prefactor A may be derived by equating
+        # these two normalizations.
         u /= np.sqrt(2*u0*u0 - 1)[..., np.newaxis]
 
+        # Save internal flow velocity array.
         self._flow_velocity = np.zeros(self._Tuv.shape[:3])
         self._flow_velocity[..., 0] = 1
         self._flow_velocity[nonzero] = u
@@ -152,7 +248,10 @@ class FreeStreamer(object):
         Use T^μν and the results of Landau matching to calculate the shear
         pressure tensor π^μν and the bulk viscous pressure Π.
 
+        eos must be a callable object, P(e).
+
         """
+        # Don't repeat the calculation for the same eos.
         if eos is self._eos:
             return
 
@@ -162,23 +261,29 @@ class FreeStreamer(object):
         e = self.energy_density()
         P = self._eos(e)
 
-        # flow velocity "outer product" u^μ u^ν
+        # Flow velocity "outer product" u^μ u^ν.
         u = self.flow_velocity()
         uu = np.einsum('...i,...j', u, u)
 
-        # metric tensor g^μν in Minkowski space
+        # Metric tensor g^μν in Minkowski space.
         g = np.diag([1., -1., -1.])
 
-        # projection operator Δ^μν
+        # Projection operator Δ^μν.
         Delta = g - uu
 
-        # effective pressure = ideal + bulk = P + Π
+        # Compute the effective pressure = ideal + bulk = P + Π.
+        # See Eq. (11) in [1].
         Peff = -np.einsum('au,bv,...ab,...uv', g, g, Delta, T)/3
 
+        # numpy indexing experession required to broadcast an array onto
+        # another with two more dimensions.
         broadcast = np.index_exp[..., np.newaxis, np.newaxis]
 
+        # Compute and save the shear pressure tensor π^μν.
+        # See Eq. (13) in [1].
         self._shear_tensor = T - e[broadcast]*uu + Peff[broadcast]*Delta
 
+        # Compute and save the bulk viscous pressure.
         self._bulk_pressure = Peff - P
 
     def shear_tensor(self, u=None, v=None, eos=ideal_eos):
