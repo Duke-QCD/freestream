@@ -137,7 +137,8 @@ class FreeStreamer(object):
         self._Tuv = Tuv
         self._energy_density = None
         self._flow_velocity = None
-        self._eos = None
+        self._shear_tensor = None
+        self._total_pressure = None
 
     def Tuv(self, u=None, v=None):
         """
@@ -243,23 +244,13 @@ class FreeStreamer(object):
         else:
             return self._flow_velocity[..., u]
 
-    def _compute_viscous_corrections(self, eos):
+    def _compute_viscous_corrections(self):
         """
         Use T^μν and the results of Landau matching to calculate the shear
-        pressure tensor π^μν and the bulk viscous pressure Π.
-
-        eos must be a callable object, P(e).
+        pressure tensor π^μν and the total pressure (P + Π).
 
         """
-        # Don't repeat the calculation for the same eos.
-        if eos is self._eos:
-            return
-
-        self._eos = eos
-
         T = self.Tuv()
-        e = self.energy_density()
-        P = self._eos(e)
 
         # Flow velocity "outer product" u^μ u^ν.
         u = self.flow_velocity()
@@ -271,27 +262,28 @@ class FreeStreamer(object):
         # Projection operator Δ^μν.
         Delta = g - uu
 
-        # Compute the effective pressure = ideal + bulk = P + Π.
+        # Compute and save the total pressure = ideal + bulk = P + Π.
         # See Eq. (11) in [1].
-        Peff = -np.einsum('au,bv,...ab,...uv', g, g, Delta, T)/3
+        self._total_pressure = np.einsum('au,bv,...ab,...uv', g, g, Delta, T)
+        self._total_pressure /= -3
 
-        # numpy indexing experession required to broadcast an array onto
-        # another with two more dimensions.
-        broadcast = np.index_exp[..., np.newaxis, np.newaxis]
+        # Add two trailing dimensions to the energy density and total pressure
+        # arrays (n, n) -> (n, n, 1, 1) so that they can broadcast onto the uu
+        # and Delta arrays (n, n, 3, 3).
+        e = self.energy_density()[..., np.newaxis, np.newaxis]
+        Ptotal = self._total_pressure[..., np.newaxis, np.newaxis]
 
         # Compute and save the shear pressure tensor π^μν.
         # See Eq. (13) in [1].
-        self._shear_tensor = T - e[broadcast]*uu + Peff[broadcast]*Delta
+        self._shear_tensor = T - e*uu + Ptotal*Delta
 
-        # Compute and save the bulk viscous pressure.
-        self._bulk_pressure = Peff - P
-
-    def shear_tensor(self, u=None, v=None, eos=ideal_eos):
+    def shear_tensor(self, u=None, v=None):
         """
         Shear pressure tensor π^μν.
 
         """
-        self._compute_viscous_corrections(eos)
+        if self._shear_tensor is None:
+            self._compute_viscous_corrections()
 
         if u is None and v is None:
             return self._shear_tensor
@@ -305,6 +297,10 @@ class FreeStreamer(object):
         Bulk viscous pressure Π.
 
         """
-        self._compute_viscous_corrections(eos)
+        if self._total_pressure is None:
+            self._compute_viscous_corrections()
+
+        # Compute Π = (P + Π) - P = (total pressure) - P, P = P(e) from eos.
+        self._bulk_pressure = self._total_pressure - eos(self.energy_density())
 
         return self._bulk_pressure
