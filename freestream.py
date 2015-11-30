@@ -7,7 +7,7 @@ import scipy.interpolate as interp
 
 __all__ = ['ideal_eos', 'FreeStreamer']
 
-__version__ = '1.0-dev'
+__version__ = '1.0.0'
 
 
 """
