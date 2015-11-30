@@ -134,7 +134,7 @@ The code does not check for overflow.
 
 Testing and internals
 ---------------------
-``FreeStreamer`` uses a two-dimensional cubic spline (`scipy.interpolate.RectBivariateSpline <https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RectBivariateSpline.html>`_ to construct a continuous initial condition profile from a discrete grid.
+``FreeStreamer`` uses a two-dimensional cubic spline (`scipy.interpolate.RectBivariateSpline <https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RectBivariateSpline.html>`_) to construct a continuous initial condition profile from a discrete grid.
 This is very precise provided the grid spacing is small enough.
 The spline sometimes goes very slightly negative around sharp boundaries; ``FreeStreamer`` coerces these negative values to zero.
 
@@ -147,6 +147,10 @@ There are two unit tests:
 
 - Comparison against an analytic solution for a symmetric Gaussian initial state (computed in Mathematica).
 - Comparison against a randomly-generated initial condition without interpolation.
+
+These tests occasionally fail since there is a random component and the tolerance is somewhat stringent (every grid point must agree within 0.1%).
+When a test fails, it will print out a list of ratios (observed/expected).
+Typically the failures occur at the outermost grid cell where the system is very dilute, and even there it will only miss by ~0.2%.
 
 To generate visualizations, execute ``test.py`` as a script with two arguments, the test case to visualize and a PDF output file.
 There are three test cases:

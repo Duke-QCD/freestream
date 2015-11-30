@@ -43,9 +43,9 @@ class FreeStreamer(object):
 
     Parameters:
 
-        initial -- square (n, n) array containing the initial state
+        initial  -- square (n, n) array containing the initial state
         grid_max -- x and y max of the grid in fm (see online readme)
-        time -- time to free stream in fm
+        time     -- time to free stream in fm
 
     After creating a FreeStreamer object, extract the various hydro quantities
     using its methods
