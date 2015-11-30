@@ -22,7 +22,7 @@ References:
 [2] W. Broniowski, W. Florkowski, M. Chojnacki, A. Kisiel
     Free-streaming approximation in early dynamics
         of relativistic heavy-ion collisions
-    PRCC 80 034902 (2009)
+    PRC 80 034902 (2009)
     arXiv:0812.3393 [nucl-th]
     http://inspirehep.net/record/805616
 """
@@ -40,6 +40,19 @@ class FreeStreamer(object):
     """
     Free streaming and Landau matching for boost-invariant hydrodynamic initial
     conditions.
+
+    Parameters:
+
+        initial -- square (n, n) array containing the initial state
+        grid_max -- x and y max of the grid in fm (see online readme)
+        time -- time to free stream in fm
+
+    After creating a FreeStreamer object, extract the various hydro quantities
+    using its methods
+
+        Tuv, energy_density, flow_velocity, shear_tensor, bulk_pressure
+
+    See the online readme and the docstring of each method.
 
     """
     def __init__(self, initial, grid_max, time):
@@ -144,6 +157,13 @@ class FreeStreamer(object):
         """
         Energy-momentum tensor T^μν.
 
+        With no arguments, returns an (n, n, 3, 3) array containing the full
+        tensor at each grid point.
+
+        With two integer arguments, returns an (n, n) array containing the
+        requested component of the tensor at each grid point.  For example
+        FreeStreamer.Tuv(0, 0) returns T00.
+
         """
         if u is None and v is None:
             return self._Tuv
@@ -225,6 +245,8 @@ class FreeStreamer(object):
         """
         Energy density in the local rest frame from Landau matching.
 
+        Returns an (n, n) array.
+
         """
         if self._energy_density is None:
             self._compute_energy_density_flow_velocity()
@@ -234,6 +256,12 @@ class FreeStreamer(object):
     def flow_velocity(self, u=None):
         """
         Fluid flow velocity u^μ from Landau matching.
+
+        With no arguments, returns an (n, n, 3) array containing the flow
+        vector at each grid point.
+
+        With a single integer argument, returns an (n, n) array containing the
+        requested component of the flow vector at each grid point.
 
         """
         if self._flow_velocity is None:
@@ -281,6 +309,13 @@ class FreeStreamer(object):
         """
         Shear pressure tensor π^μν.
 
+        With no arguments, returns an (n, n, 3, 3) array containing the full
+        tensor at each grid point.
+
+        With two integer arguments, returns an (n, n) array containing the
+        requested component of the tensor at each grid point.  For example
+        FreeStreamer.shear_tensor(1, 2) returns pi12.
+
         """
         if self._shear_tensor is None:
             self._compute_viscous_corrections()
@@ -295,6 +330,11 @@ class FreeStreamer(object):
     def bulk_pressure(self, eos=ideal_eos):
         """
         Bulk viscous pressure Π.
+
+        Optional parameter eos must be a callable object that evaluates the
+        equation of state P(e). The default is the ideal EoS, P(e) = e/3.
+
+        Returns an (n, n) array.
 
         """
         if self._total_pressure is None:
