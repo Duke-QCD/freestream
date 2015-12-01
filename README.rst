@@ -2,6 +2,11 @@ freestream
 ==========
 *Free streaming and Landau matching for boost-invariant hydrodynamic initial conditions.*
 
+.. image:: http://giant.gfycat.com/AffectionateQuerulousAfricanwilddog.gif
+   :target: http://gfycat.com/AffectionateQuerulousAfricanwilddog
+
+|
+
 ``freestream`` is a Python implementation of pre-equilibrium free streaming for heavy-ion collisions, as described in
 
 - J. Liu, C. Shen, U. Heinz,
@@ -166,3 +171,15 @@ For example::
 will run the ``gaussian1`` test case and save results in ``freestream.pdf``.
 The PDF contains visualizations of the initial state and everything that ``FreeStreamer`` computes.
 In each visualization, red colors indicate positive values, blue means negative, and the maximum absolute value of the array is annotated in the upper left.
+
+Animations
+----------
+The included script ``animate.py`` generates animations (like the one at the top of this page) from initial conditions saved in HDF5 format (e.g. `trento <https://github.com/Duke-QCD/trento>`_ events).
+It requires python3 with matplotlib and h5py, and of course ``freestream`` must be installed.
+To animate a trento event, first generate some events in HDF5 format then run the script::
+
+   trento Pb Pb 10 -o events.hdf
+   ./animate.py events.hdf event_0 freestream.mp4
+
+The first argument is the HDF5 filename, the second is the dataset to animate, and the last is the animation filename.
+Run ``./animate.py --help`` for more information including options for the animation duration, framerate, colormap, etc.
