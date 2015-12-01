@@ -43,11 +43,12 @@ where
 The ``initial`` array must contain a two-dimensional (boost-invariant) initial condition discretized onto a uniform square grid.
 It is then interpreted as a density profile of non-interacting massless partons at time *τ* = 0+.
 
-The ``grid_max`` parameter sets the outermost *edge* of the grid, *not* the midpoint of the outer grid cell (this is the same definition as `trento <https://github.com/Duke-QCD/trento>`_).
-For example:
+The ``grid_max`` parameter sets the outermost *edge* of the grid, *not* the midpoint of the outer grid cell, e.g.
 
 - A 200 × 200 grid with a max of 10.0 fm has cell edges at -10.00, -9.90, ..., +10.00 and cell midpoints at -9.95, -9.85, ..., +9.95.
 - A 201 × 201 grid with a max of 10.05 fm has cell edges at -10.05, -9.95, ..., +10.05 and cell midpoints at -10.00, -9.90, ..., +10.00.
+
+This is the same definition as the `trento <https://github.com/Duke-QCD/trento>`_ ``--grid-max`` parameter.
 
 **It is very important that the grid max is set correctly to avoid superluminal propagation.**
 
@@ -68,14 +69,14 @@ Energy-momentum tensor *T*\ :sup:`μν`
 
    Tuv = fs.Tuv()
 
-``Tuv`` is now an *n* × *n* × 3 × 3 array containing the full tensor at each grid point.
+``Tuv`` is an *n* × *n* × 3 × 3 array containing the full tensor at each grid point.
 If we only want a certain component of the tensor, we can pass indices to the function:
 
 .. code-block:: python
 
    T00 = fs.Tuv(0, 0)
 
-``T00`` is now an *n* × *n* array containing *T*\ :sup:`00` at each grid point.
+``T00`` is an *n* × *n* array containing *T*\ :sup:`00` at each grid point.
 This is purely for syntactic convenience: ``fs.Tuv(0, 0)`` is equivalent to ``fs.Tuv()[:, :, 0, 0]``.
 
 Energy density *e* and flow velocity *u*\ :sup:`μ`
