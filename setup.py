@@ -18,7 +18,7 @@ setup(
     url='https://github.com/Duke-QCD/freestream',
     license='MIT',
     py_modules=['freestream'],
-    install_requires=['numpy>=1.8.0', 'scipy'],
+    install_requires=['numpy>=1.8.0', 'scipy>=0.14.0'],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Science/Research',

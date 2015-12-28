@@ -24,7 +24,7 @@ Simply run ::
 
    pip install freestream
 
-The only requirements are numpy (1.8.0 or later) and scipy.
+The only requirements are numpy (1.8.0 or later) and scipy (0.14.0 or later).
 
 Usage
 -----
