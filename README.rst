@@ -2,7 +2,7 @@ freestream
 ==========
 *Free streaming and Landau matching for boost-invariant hydrodynamic initial conditions.*
 
-.. image:: http://giant.gfycat.com/AffectionateQuerulousAfricanwilddog.gif
+.. image:: https://thumbs.gfycat.com/AffectionateQuerulousAfricanwilddog-size_restricted.gif
    :target: http://gfycat.com/AffectionateQuerulousAfricanwilddog
 
 |
