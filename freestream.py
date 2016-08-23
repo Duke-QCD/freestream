@@ -68,11 +68,15 @@ class FreeStreamer(object):
         # They are different by half a cell width, i.e. grid_max/nsteps.
         xymax = grid_max*(1 - 1/nsteps)
 
-        # Initialize the 2D interpolating spline.
+        # Initialize the 2D interpolating splines.
+        # Need both linear and cubic splines -- see below.
         # The scipy class has the x and y dimensions reversed,
         # so give it the transpose of the initial state.
         xy = np.linspace(-xymax, xymax, nsteps)
-        spline = interp.RectBivariateSpline(xy, xy, initial.T)
+        spline1, spline3 = (
+            interp.RectBivariateSpline(xy, xy, initial.T, kx=k, ky=k)
+            for k in [1, 3]
+        )
 
         # Prepare for evaluating the T^μν integrals, Eq. (7) in [1] and
         # Eq. (10) in [2].  For each grid cell, there are six integrals
@@ -123,21 +127,28 @@ class FreeStreamer(object):
         # may even be slower.  Vectorizing each row sufficiently minimizes the
         # function call overhead with a manageable memory footprint.
         for row, y in zip(Tuv, Y):
-            # Evaluate the spline on all the integration points for this row.
-            # Z (nsteps, npoints) contains the function evaluations along the
-            # circles centered at each grid point along the row.  This line
-            # accounts for ~90% of the total computation time!
-            Z = spline(X, y, grid=False)
-            # Cubic interpolation can sometimes go slightly negative.
-            Z.clip(min=0, out=Z)
-            # Compute all six integrals in a single function call to the inner
-            # product and write the result into the T^μν array.  np.inner
-            # calculates the sum over the last axes of Z (nsteps, npoints) and
-            # K (6, npoints), returning an (nsteps, 6) array.  In other words,
-            # it sums over the integration points for each grid cell in the
-            # row.  np.inner is a highly-optimized linear algebra routine so
-            # this is very efficient.
-            row[:, u, v] = np.inner(Z, K)
+            # Evaluate the splines on all the integration points for this row.
+            # (These lines account for ~90% of the total computation time!)
+            # Cubic interpolation (Z3) accurately captures the curvature of the
+            # initial state, but can produce artifacts and negative values near
+            # the edges; linear interpolation (Z1) cannot capture the
+            # curvature, but behaves correctly at the edges.  To combine the
+            # advantages, use Z3 where both splines are positive, otherwise set
+            # to zero.
+            Z1 = spline1(X, y, grid=False)
+            Z3 = spline3(X, y, grid=False)
+            Z3 = np.where((Z1 > 0) & (Z3 > 0), Z3, 0)
+
+            # Z3 (nsteps, npoints) contains the function evaluations along the
+            # circles centered at each grid point along the row.  Now compute
+            # all six integrals in a single function call to the inner product
+            # and write the result into the T^μν array.  np.inner calculates
+            # the sum over the last axes of Z3 (nsteps, npoints) and K (6,
+            # npoints), returning an (nsteps, 6) array.  In other words, it
+            # sums over the integration points for each grid cell in the row.
+            # np.inner is a highly-optimized linear algebra routine so this is
+            # very efficient.
+            row[:, u, v] = np.inner(Z3, K)
 
         # Copy the upper triangle to the lower triangle.
         u, v = zip(*[(0, 1), (0, 2), (1, 2)])
@@ -201,15 +212,33 @@ class FreeStreamer(object):
         # over the array, but it is executed in C).
         eigvals, eigvecs = np.linalg.eig(Tu_v)
 
+        # Eigenvalues/vectors can sometimes be complex.  This is numerically
+        # valid but clearly the physical energy density must be real.
+        # Therefore take the real part and ignore any complex
+        # eigenvalues/vectors.
+        if np.iscomplexobj(eigvals):
+            imag = eigvals.imag != 0
+            eigvals = eigvals.real
+            eigvals[imag] = 0
+            eigvecs = eigvecs.real
+            eigvecs.transpose(0, 2, 1)[imag] = 0
+
         # eigvals (n, 3) contains the 3 eigenvalues for each nonzero grid cell.
         # eigvecs (n, 3, 3) contains the eigenvectors, where in each (3, 3)
         # block the columns are the vectors and the rows are the (t, x, y)
         # components.
 
         # The physical flow velocity and energy density correspond to the
-        # (unique) timelike eigenvector.
-        t, x, y = eigvecs.transpose(1, 0, 2)
-        timelike = t*t > x*x + y*y
+        # (unique) timelike eigenvector.  Given eigenvectors (t, x, y) the
+        # timelike condition may be written (t^2 > x^2 + y^2).  Since the
+        # vectors are normalized to t^2 + x^2 + y^2 = 1, the timelike condition
+        # may be simplified to t^2 > 1/2.  However, t^2 == 1/2 corresponds to a
+        # perfectly lightlike vector, which is numerically undesirable.
+        # Testing reveals that the maximum realistic gamma (Lorentz) factor is
+        # ~40, but sometimes a few cells will have gamma >> 1000 due to
+        # numerical errors.  Therefore ignore cells above a threshold.
+        gamma_max = 100
+        timelike = eigvecs[:, 0]**2 > 1/(2 - 1/gamma_max**2)
 
         # "timelike" is an (n, 3) array of booleans denoting the timelike
         # eigenvector (if any) for each grid cell.  This line updates the

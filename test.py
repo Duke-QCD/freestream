@@ -282,26 +282,38 @@ def main():
         initial = np.exp(-(np.square(X - 0.5) + 3*np.square(Y - 1)))
     elif args.plot == 'random':
         Y, X = np.mgrid[s, s]
-        initial = sum(
-            np.exp(-(np.square(X - x0) + np.square(Y - y0))/(2*0.4**2))
-            for (x0, y0) in np.random.standard_normal(50).reshape(-1, 2)
-        )
+        initial = np.zeros_like(X)
+        sigmasq = .4**2
+        # truncate gaussians at several widths (mimics typical IC models)
+        rsqmax = 5**2 * sigmasq
+        for x0, y0 in np.random.standard_normal((25, 2)):
+            rsq = (X - x0)**2 + (Y - y0)**2
+            cut = rsq < rsqmax
+            initial[cut] += np.exp(-.5*rsq[cut]/sigmasq)
 
     fs = freestream.FreeStreamer(initial, grid_max, 1.0)
 
     plt.rcdefaults()
 
-    def pcolorfast(arr, ax=None, title=None):
+    def pcolorfast(arr, ax=None, title=None, vrange=None):
         if ax is None:
             ax = plt.gca()
 
-        vmax = np.abs(arr).max()
+        arrmax = np.abs(arr).max()
+
+        try:
+            vmin, vmax = vrange
+        except TypeError:
+            vmax = arrmax if vrange is None else vrange
+            vmin = -vmax
+        else:
+            vmin = 2*vmin - vmax
 
         ax.set_aspect('equal')
         ax.pcolorfast((-grid_max, grid_max), (-grid_max, grid_max), arr,
-                      vmin=-vmax, vmax=vmax, cmap=plt.cm.RdBu_r)
+                      vmin=vmin, vmax=vmax, cmap=plt.cm.RdBu_r)
 
-        ax.text(-0.9*grid_max, 0.9*grid_max, 'max = {:g}'.format(vmax),
+        ax.text(-0.9*grid_max, 0.9*grid_max, 'max = {:g}'.format(arrmax),
                 ha='left', va='top')
 
         ax.set_xlim(-grid_max, grid_max)
@@ -316,17 +328,19 @@ def main():
             pdf.savefig()
             plt.close()
 
-        for arr, title in [
-            (initial, 'initial state'),
-            (fs.energy_density(), r'energy density'),
-            (fs.flow_velocity(0), r'$u^0$'),
-            (fs.flow_velocity(1), r'$u^1$'),
-            (fs.flow_velocity(2), r'$u^2$'),
-            (fs.bulk_pressure(), r'$\Pi$'),
+        gamma_max = np.percentile(fs.flow_velocity(0), 90)
+
+        for arr, title, vrange in [
+            (initial, 'initial state', None),
+            (fs.energy_density(), r'energy density', None),
+            (fs.flow_velocity(0), r'$u^0$', (1, gamma_max)),
+            (fs.flow_velocity(1), r'$u^1$', gamma_max),
+            (fs.flow_velocity(2), r'$u^2$', gamma_max),
+            (fs.bulk_pressure(), r'$\Pi$', 1e-15),
         ]:
             plt.figure(figsize=(6, 6))
 
-            pcolorfast(arr, title=title)
+            pcolorfast(arr, title=title, vrange=vrange)
 
             plt.xlabel(r'$x$ [fm]')
             plt.ylabel(r'$y$ [fm]')
