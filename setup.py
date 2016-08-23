@@ -3,14 +3,18 @@
 
 from setuptools import setup
 
-import freestream
-
 with open('README.rst') as f:
     long_description = f.read()
 
+def version():
+    with open('freestream.py', 'r') as f:
+        for l in f:
+            if l.startswith('__version__'):
+                return l.split('=')[1].strip(" '\n")
+
 setup(
     name='freestream',
-    version=freestream.__version__,
+    version=version(),
     description='Free streaming for heavy-ion collision initial conditions.',
     long_description=long_description,
     author='Jonah Bernhard',
