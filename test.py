@@ -24,6 +24,28 @@ def assert_allclose(a, b, name, rtol=1e-3, atol=1e-6):
         '{} does not agree:\n{}'.format(name, a/b)
 
 
+def _check_shear_orthogonal(fs):
+    """
+    Check that the shear tensor is orthogonal to the flow velocity,
+    pi^uv u_v = 0, or actually, pi^uv u_v < epsilon*sqrt(pi^uv pi_uv).
+
+    """
+    g = np.array([1, -1, -1])
+
+    u = fs.flow_velocity()
+    pi = fs.shear_tensor()
+
+    upi = np.einsum('...uv,...v,v', pi, u, g)
+    pipi = np.einsum('...uv,...uv,u,v', pi, pi, g, g)
+
+    assert np.all(
+        (np.abs(upi) < 1e-14) | (upi*upi < 1e-14*pipi[..., np.newaxis])
+    ), (
+        'Shear tensor is not orthogonal to flow velocity (min = {}, max = {}).'
+        .format(upi.min(), upi.max())
+    )
+
+
 def test_gaussian():
     """
     check symmetric gaussian against analytic solution
@@ -121,6 +143,8 @@ def test_gaussian():
     ]:
         assert_allclose(fs.shear_tensor(u, v)[pos_x], prefactor*piuv_exact,
                         'shear tensor pi{}{}'.format(u, v))
+
+    _check_shear_orthogonal(fs)
 
     # Bulk pressure is zero for ideal eos...
     assert_allclose(fs.bulk_pressure(), 0, 'ideal bulk pressure',
@@ -238,6 +262,8 @@ def test_random():
         pi11.shape == fs.shear_tensor().shape[:2],
         np.all(pi11 == fs.shear_tensor()[..., 1, 1]),
     ]), 'pi11 is not a view of shear_tensor'
+
+    _check_shear_orthogonal(fs)
 
     assert_raises(ValueError, fs.shear_tensor, 2)
 
