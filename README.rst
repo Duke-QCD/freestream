@@ -26,6 +26,10 @@ Simply run ::
 
 The only requirements are numpy (1.8.0 or later) and scipy (0.14.0 or later).
 
+**Possible issue:**
+A ``UnicodeDecodeError`` may occur if the system locale is not set to a UTF-8 encoding (due to the Greek characters in this readme and the code docstrings).
+To resolve this, `configure the locale <https://wiki.archlinux.org/index.php/Locale>`_ or simply set the ``LANG`` environment variable, e.g. ``export LANG=en_US.UTF-8``.
+
 Usage
 -----
 ``freestream`` has an object-oriented interface through the ``FreeStreamer`` class, which takes three parameters:
